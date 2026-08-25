@@ -218,6 +218,7 @@ Taxonomy IDs must remain stable even if a display label changes.
 | Name | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `q` | string | No | Free-text event search. |
+| `artist` | string | No | Free-text artist or performer name. Matching should be case- and accent-insensitive. |
 | `location_reference` | string | No | Reference selected from a location suggestion. |
 | `venue_reference` | string | No | Reference selected from a venue suggestion. |
 | `starts_on_or_after` | date | No | Inclusive local calendar date. |
@@ -232,7 +233,7 @@ Taxonomy IDs must remain stable even if a display label changes.
 Example:
 
 ```http
-GET /v1/events?location_reference=manchester&starts_on_or_after=2027-03-10&starts_on_or_before=2027-03-16&category=gigs&genre=rock&genre=indie&sort=date&limit=24
+GET /v1/events?artist=Neon%20Parallels&location_reference=manchester&starts_on_or_after=2027-03-10&starts_on_or_before=2027-03-16&category=gigs&genre=rock&genre=indie&sort=date&limit=24
 ```
 
 ### Response
@@ -243,6 +244,7 @@ GET /v1/events?location_reference=manchester&starts_on_or_after=2027-03-10&start
   "total_count": 59,
   "heading": "Gigs in Manchester",
   "applied_filters": {
+    "artist": "Neon Parallels",
     "location": { "reference": "manchester", "label": "Manchester" },
     "date_range": {
       "from": "2027-03-10",
@@ -316,6 +318,8 @@ Every item must supply enough data to render the card without another API reques
 Physical venue results must include `venue.location`. Online-only events may return `venue: null` and `attendance_mode: "online"`. An event whose coordinates are unknown must not be silently placed at a city-centre fallback coordinate.
 
 The same standardized `/v1/events` items power both the list and map. There is no separate map response. WordPress plots each result using `venue.location`, while `location_reference` remains the user-facing location filter.
+
+The `artist` parameter filters events by a credited artist or performer name rather than by event-title text alone. The provider should apply its authoritative artist data and alias rules instead of having WordPress infer artists from titles.
 
 `price_from` may be `null` for a free, registration-only, not-yet-priced or unavailable event, but the provider must supply a machine-readable reason such as `price_display: "free"`, `"register"`, `"coming_soon"` or `"unavailable"`.
 
@@ -518,7 +522,7 @@ The API provider should confirm or amend the following before implementation:
 7. Source of result headings such as “Gigs in Manchester”: API or frontend.
 8. Price semantics: fees, VAT, free events and events without a published price.
 9. Visibility rules for sold-out, postponed, rescheduled and cancelled events.
-10. Search ranking, synonyms, spelling tolerance and minimum query length.
+10. Search ranking, synonyms, spelling tolerance, minimum query length, and whether `artist` matching supports exact names, partial names and aliases.
 11. Maximum page size, rate limits, caching and index freshness.
 12. The stable, URL-safe event reference format used by WordPress routes.
 13. Supported locales, currencies and countries at launch.
