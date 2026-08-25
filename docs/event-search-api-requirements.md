@@ -27,7 +27,7 @@ The proposed endpoint names, field names and object boundaries may differ from t
 
 The API provider should identify:
 
-- how its current show/event, venue, taxonomy, price and availability objects map to this document;
+- how its current show/event, venue, taxonomy and availability objects map to this document;
 - which proposed fields already exist under different names or in different objects;
 - where existing endpoints can satisfy the requirement without introducing new endpoints;
 - fields or behaviours that are unavailable, expensive or inconsistent with the current data model;
@@ -36,7 +36,7 @@ The API provider should identify:
 
 Exact payload structure can be adapted by agreement. The important outcomes are that the website receives the required information, relationships and behaviour with clear ownership and reliable performance. Where the supplier proposes a different contract, it should provide an example payload and a short mapping back to the relevant requirement in this document.
 
-A small transformation in WordPress or an integration layer is acceptable when it keeps responsibilities clear. Search meaning, availability, pricing and other business-critical rules should remain owned by the authoritative backend rather than being reconstructed independently in the browser.
+A small transformation in WordPress or an integration layer is acceptable when it keeps responsibilities clear. Search meaning, availability and other business-critical rules should remain owned by the authoritative backend rather than being reconstructed independently in the browser.
 
 ## 3. Experience represented in the design
 
@@ -44,7 +44,7 @@ A small transformation in WordPress or an integration layer is acceptable when i
 
 The global search accepts an event, genre, venue or location. While the visitor types, results are grouped into:
 
-- Events — up to five results with image, title, venue summary and starting price;
+- Events — up to five results with image, title and venue summary;
 - Venues — venue name;
 - Locations — city or area name.
 
@@ -79,7 +79,6 @@ The genre list should be treated as API-managed data rather than a permanent har
 | References | Stable, immutable, URL-safe strings. WordPress uses the event reference to build its local `/events/{reference}` route. |
 | Dates | Calendar dates use ISO 8601 `YYYY-MM-DD`. |
 | Date/times | RFC 3339 with an explicit UTC offset, plus an IANA timezone on the event. |
-| Money | Integer minor units plus ISO 4217 currency, for example `1850` and `GBP`. Never use floating-point prices. |
 | Pagination | Opaque cursor. Results must remain in a deterministic order while paging. |
 | Images | HTTPS URL, width, height and alt text. At least one card-ready crop is required. |
 | Coordinates | WGS84 decimal latitude and longitude (`EPSG:4326`). Latitude is `-90` to `90`; longitude is `-180` to `180`. |
@@ -138,12 +137,7 @@ GET /v1/search/suggestions?q=manchester&limit_per_group=5
           "height": 800,
           "alt": "Faithless"
         },
-        "venue_summary": "Manchester Academy, Manchester",
-        "price_from": {
-          "amount_minor": 1850,
-          "currency": "GBP",
-          "includes_fees": false
-        }
+        "venue_summary": "Manchester Academy, Manchester"
       }
     ],
     "venues": [
@@ -280,11 +274,6 @@ GET /v1/events?artist=Neon%20Parallels&location_reference=manchester&starts_on_o
         }
       },
       "attendance_mode": "physical",
-      "price_from": {
-        "amount_minor": 1850,
-        "currency": "GBP",
-        "includes_fees": false
-      },
       "availability": {
         "status": "on_sale",
         "display_label": "On sale 24th Jul"
@@ -311,7 +300,6 @@ Every item must supply enough data to render the card without another API reques
 - local start date and time;
 - venue name and city;
 - attendance mode;
-- lowest currently purchasable price and currency, when available;
 - availability/status label, when applicable;
 - enough identity data for WordPress to build the local event route.
 
@@ -320,8 +308,6 @@ Physical venue results must include `venue.location`. Online-only events may ret
 The same standardized `/v1/events` items power both the list and map. There is no separate map response. WordPress plots each result using `venue.location`, while `location_reference` remains the user-facing location filter.
 
 The `artist` parameter filters events by a credited artist or performer name rather than by event-title text alone. The provider should apply its authoritative artist data and alias rules instead of having WordPress infer artists from titles.
-
-`price_from` may be `null` for a free, registration-only, not-yet-priced or unavailable event, but the provider must supply a machine-readable reason such as `price_display: "free"`, `"register"`, `"coming_soon"` or `"unavailable"`.
 
 ### Event identity
 
@@ -423,11 +409,6 @@ The `{reference}` is the stable event reference returned by search and browse re
       }
     }
   },
-  "price_from": {
-    "amount_minor": 25000,
-    "currency": "GBP",
-    "includes_fees": false
-  },
   "purchase": {
     "method": "embed",
     "url": "https://tickets.example.com/embed/10cc_2027_02_26"
@@ -437,7 +418,7 @@ The `{reference}` is the stable event reference returned by search and browse re
 
 ### Detail behaviour
 
-- Each event response contains its date, venue, availability, price and purchase details directly.
+- Each event response contains its date, venue, availability and purchase details directly.
 - Past, cancelled or private events are excluded by default unless product requirements say otherwise.
 - The response must clearly identify an event that is sold out, postponed, rescheduled or off sale.
 - Return `404` when the event reference does not exist or is not publicly visible.
@@ -447,7 +428,7 @@ Extended venue fields are optional and belong on the full event response rather 
 
 `venue.information` is a structured object rather than a free-form repeater. Its fixed optional fields are `accessibility`, `parking`, `public_transport`, `opening_hours`, `ticket_pickup` and `facilities`; their display labels are owned by Orbit. Two optional custom slots, `custom_1` and `custom_2`, each accept a `label` and `value`. Unused fields and custom slots should be omitted rather than returned as empty strings. Values are plain text unless a safe rich-text format is explicitly agreed.
 
-The design includes a ticket purchase embed supplied by the ticketing provider. `purchase.method` should support at least `embed` and `redirect`. When the embed owns ticket types, quantities, fees and live inventory, those values should not be duplicated in this discovery API. A native Orbit ticket selector would require a separate transactional inventory and reservation contract.
+The design includes a ticket purchase embed supplied by the ticketing provider. `purchase.method` should support at least `embed` and `redirect`. The iframe is the sole source of ticket types, quantities, pricing, fees and live inventory; those values are not duplicated in this discovery API. A native Orbit ticket selector would require a separate transactional inventory and reservation contract.
 
 `venue.seating_map` is optional and represents the venue's general seating plan. `method` should support `embed` and `external_link`. WordPress is responsible for rendering the iframe or link, but the supplier must provide an HTTPS URL from an agreed, allowlisted origin. The provider must also confirm its iframe requirements, including Content Security Policy, `frame-ancestors`, cookies and any required sandbox permissions.
 
@@ -498,7 +479,7 @@ These are proposed targets for supplier confirmation:
 
 - suggestion response: p95 no more than 300 ms at the API edge;
 - event search response: p95 no more than 700 ms at the API edge;
-- event, price and availability changes searchable within five minutes;
+- event and availability changes searchable within five minutes;
 - 99.9% monthly availability, excluding agreed maintenance;
 - gzip or Brotli response compression;
 - explicit rate-limit headers and documented quotas;
@@ -520,12 +501,11 @@ The API provider should confirm or amend the following before implementation:
 5. Definitions and tie-break rules for Trending and Recently added.
 6. Whether multiple genres use OR matching, as proposed, or AND matching.
 7. Source of result headings such as “Gigs in Manchester”: API or frontend.
-8. Price semantics: fees, VAT, free events and events without a published price.
-9. Visibility rules for sold-out, postponed, rescheduled and cancelled events.
-10. Search ranking, synonyms, spelling tolerance, minimum query length, and whether `artist` matching supports exact names, partial names and aliases.
-11. Maximum page size, rate limits, caching and index freshness.
-12. The stable, URL-safe event reference format used by WordPress routes.
-13. Supported locales, currencies and countries at launch.
-14. Whether purchase uses an embed or redirect, and which system owns ticket types and live inventory.
-15. The final fixed venue-information labels — currently proposed as Accessibility, Parking, Public transport, Opening hours, Ticket pickup and Facilities — the availability of each field, any length limits for the two custom slots, and whether capacity represents a maximum or event-specific configuration.
-16. Seating-map ownership and the domains and browser permissions required for iframe embedding.
+8. Visibility rules for sold-out, postponed, rescheduled and cancelled events.
+9. Search ranking, synonyms, spelling tolerance, minimum query length, and whether `artist` matching supports exact names, partial names and aliases.
+10. Maximum page size, rate limits, caching and index freshness.
+11. The stable, URL-safe event reference format used by WordPress routes.
+12. Supported locales and countries at launch.
+13. Whether purchase uses an embed or redirect, and confirmation that the iframe owns ticket types, pricing, fees and live inventory.
+14. The final fixed venue-information labels — currently proposed as Accessibility, Parking, Public transport, Opening hours, Ticket pickup and Facilities — the availability of each field, any length limits for the two custom slots, and whether capacity represents a maximum or event-specific configuration.
+15. Seating-map ownership and the domains and browser permissions required for iframe embedding.
