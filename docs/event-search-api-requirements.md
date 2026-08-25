@@ -12,8 +12,7 @@ The Orbit consumer website needs a read-only event discovery API for:
 - browsing and filtering events;
 - displaying standard event results on a map;
 - displaying event cards and result counts;
-- displaying full event and event-series pages;
-- supporting event series that have several dates or venues;
+- displaying full event pages;
 - handling empty results and incremental “load more” pagination.
 
 This document describes the data the website needs. Endpoint names are proposed and can be mapped to an existing supplier API if the behaviour and fields are equivalent.
@@ -28,7 +27,7 @@ The proposed endpoint names, field names and object boundaries may differ from t
 
 The API provider should identify:
 
-- how its current event, occurrence/performance, venue, taxonomy, price and availability objects map to this document;
+- how its current show/event, venue, taxonomy, price and availability objects map to this document;
 - which proposed fields already exist under different names or in different objects;
 - where existing endpoints can satisfy the requirement without introducing new endpoints;
 - fields or behaviours that are unavailable, expensive or inconsistent with the current data model;
@@ -49,7 +48,7 @@ The global search accepts an event, genre, venue or location. While the visitor 
 - Venues — venue name;
 - Locations — city or area name.
 
-Selecting an event opens either an individual event or an event-series page. WordPress owns that public route and builds it from the API reference. Selecting a venue or location opens the browse page with that filter applied.
+Selecting an event opens its event page. WordPress owns that public route and builds it from the API reference. Selecting a venue or location opens the browse page with that filter applied.
 
 ### Browse page
 
@@ -79,7 +78,7 @@ The genre list should be treated as API-managed data rather than a permanent har
 | Content type | `application/json; charset=utf-8` |
 | References | Stable, immutable, URL-safe strings. WordPress uses the event reference to build its local `/events/{reference}` route. |
 | Dates | Calendar dates use ISO 8601 `YYYY-MM-DD`. |
-| Date/times | RFC 3339 with an explicit UTC offset, plus an IANA timezone on the venue/occurrence. |
+| Date/times | RFC 3339 with an explicit UTC offset, plus an IANA timezone on the event. |
 | Money | Integer minor units plus ISO 4217 currency, for example `1850` and `GBP`. Never use floating-point prices. |
 | Pagination | Opaque cursor. Results must remain in a deterministic order while paging. |
 | Images | HTTPS URL, width, height and alt text. At least one card-ready crop is required. |
@@ -95,14 +94,14 @@ All endpoints should return a `request_id` that can be supplied to the API provi
 | --- | --- | --- |
 | `GET` | `/v1/search/suggestions` | Lightweight grouped type-ahead results for events, venues and locations |
 | `GET` | `/v1/events` | Filter definitions, free-text search and filtered browsing |
-| `GET` | `/v1/events/{reference}` | Full details for an event or event series |
+| `GET` | `/v1/events/{reference}` | Full details for an event |
 
 `/v1/search/suggestions` is intentionally separate because live autocomplete returns several resource types and has a smaller response shape and tighter latency target than event browsing.
 
 `/v1/events` is the single event-list endpoint. Its representation is selected with query parameters:
 
 - `view=filters` returns filter and sort definitions;
-- omitting `view` returns the normal event-result collection.
+- omitting `view` returns the normal event-result list.
 
 ## 6. Grouped search suggestions
 
@@ -131,8 +130,7 @@ GET /v1/search/suggestions?q=manchester&limit_per_group=5
   "groups": {
     "events": [
       {
-        "reference": "faithless",
-        "result_type": "event_series",
+        "reference": "faithless-manchester-2027-03-14",
         "title": "Faithless",
         "image": {
           "url": "https://media.example.com/events/faithless-card.jpg",
@@ -140,13 +138,12 @@ GET /v1/search/suggestions?q=manchester&limit_per_group=5
           "height": 800,
           "alt": "Faithless"
         },
-        "venue_summary": "Various venues",
+        "venue_summary": "Manchester Academy, Manchester",
         "price_from": {
           "amount_minor": 1850,
           "currency": "GBP",
           "includes_fees": false
-        },
-        "occurrence_count": 6
+        }
       }
     ],
     "venues": [
@@ -261,8 +258,6 @@ GET /v1/events?location_reference=manchester&starts_on_or_after=2027-03-10&start
   "items": [
     {
       "reference": "neon-parallels-2027-03-12",
-      "event_reference": "neon-parallels",
-      "result_type": "event_occurrence",
       "title": "Neon Parallels",
       "image": {
         "url": "https://media.example.com/events/neon-parallels-card.jpg",
@@ -282,6 +277,7 @@ GET /v1/events?location_reference=manchester&starts_on_or_after=2027-03-10&start
           "longitude": -2.2323
         }
       },
+      "attendance_mode": "physical",
       "price_from": {
         "amount_minor": 1850,
         "currency": "GBP",
@@ -297,7 +293,7 @@ GET /v1/events?location_reference=manchester&starts_on_or_after=2027-03-10&start
   ],
   "page": {
     "limit": 24,
-    "next_cursor": "eyJhZnRlciI6Im9jY18yNCJ9",
+    "next_cursor": "eyJhZnRlciI6ImV2ZW50XzI0In0",
     "has_more": true
   }
 }
@@ -307,11 +303,12 @@ GET /v1/events?location_reference=manchester&starts_on_or_after=2027-03-10&start
 
 Every item must supply enough data to render the card without another API request:
 
-- stable occurrence and parent-event references;
+- a stable event reference;
 - event title;
 - card image and alt text;
 - local start date and time;
-- venue name and city, or a `venue_summary` for a multi-venue series;
+- venue name and city;
+- attendance mode;
 - lowest currently purchasable price and currency, when available;
 - availability/status label, when applicable;
 - enough identity data for WordPress to build the local event route.
@@ -322,16 +319,9 @@ The same standardized `/v1/events` items power both the list and map. There is n
 
 `price_from` may be `null` for a free, registration-only, not-yet-priced or unavailable event, but the provider must supply a machine-readable reason such as `price_display: "free"`, `"register"`, `"coming_soon"` or `"unavailable"`.
 
-### Multi-date and multi-venue events
+### Event identity
 
-When one browse result represents a series rather than a single occurrence:
-
-- set `result_type` to `event_series`;
-- include `occurrence_count`;
-- include `next_occurrence_at` instead of presenting an arbitrary date as the only date;
-- include `venue_summary`, for example `Various venues`;
-- use the lowest purchasable price across visible future occurrences;
-- return the parent event reference so WordPress can route to the series page where the visitor chooses a date or venue.
+Each browse result represents one independently selectable show, with its own date, venue and stable event reference. If a tour or production has several dates or venues, each show is returned as a separate event rather than grouped beneath another API resource.
 
 ### Zero results
 
@@ -343,21 +333,14 @@ Featured events displayed beneath the zero-results message are managed by WordPr
 
 `GET /v1/events/{reference}`
 
-The `{reference}` is the stable parent event reference returned by search and browse responses. WordPress uses the same reference in its local `/events/{reference}` route and calls this API endpoint to render the page.
-
-An occurrence selected from a listing can be identified with an optional query parameter:
-
-```http
-GET /v1/events/10cc?occurrence_reference=10cc-2027-02-26
-```
+The `{reference}` is the stable event reference returned by search and browse responses. WordPress uses the same reference in its local `/events/{reference}` route and calls this API endpoint to render the page.
 
 ### Response
 
 ```json
 {
   "request_id": "req_01JABC127",
-  "reference": "10cc",
-  "event_format": "series",
+  "reference": "10cc-2027-02-26",
   "title": "10cc",
   "summary": "10cc live in concert",
   "description": "Among the most inventive and influential bands in popular music...",
@@ -387,92 +370,82 @@ GET /v1/events/10cc?occurrence_reference=10cc-2027-02-26
   "additional_information": [
     { "label": "More event info", "value": "Doors 5pm" }
   ],
-  "selected_occurrence_reference": "10cc-2027-02-26",
-  "occurrences": [
-    {
-      "reference": "10cc-2027-02-26",
-      "starts_at": "2027-02-26T19:30:00+00:00",
-      "doors_at": "2027-02-26T17:00:00+00:00",
-      "timezone": "Europe/London",
-      "availability": {
-        "status": "on_sale",
-        "display_label": "On sale"
-      },
-      "venue": {
-        "reference": "venue-cymru-theatre",
-        "name": "Venue Cymru Theatre",
-        "city": "Llandudno",
-        "country_code": "GB",
-        "address": {
-          "line_1": "The Promenade",
-          "postal_code": "LL30 1BB"
-        },
-        "location": {
-          "latitude": 53.321,
-          "longitude": -3.816
-        },
-        "capacity": {
-          "value": 2500,
-          "qualifier": "maximum"
-        },
-        "contacts": {
-          "box_office_phone": "+441234567890",
-          "box_office_phone_display": "01234 567890",
-          "box_office_email": "boxoffice@venue.example.com"
-        },
-        "website_url": "https://venue.example.com",
-        "seating_map": {
-          "method": "embed",
-          "label": "View seating map",
-          "url": "https://venue.example.com/seating-map"
-        },
-        "information": [
-          {
-            "type": "accessibility",
-            "label": "Accessibility",
-            "value": "Step-free access and accessible seating are available."
-          },
-          {
-            "type": "parking",
-            "label": "Parking",
-            "value": "Public parking is available nearby."
-          }
-        ]
-      },
-      "price_from": {
-        "amount_minor": 25000,
-        "currency": "GBP",
-        "includes_fees": false
-      },
-      "purchase": {
-        "method": "embed",
-        "url": "https://tickets.example.com/embed/occ_10cc_2027_02_26"
+  "starts_at": "2027-02-26T19:30:00+00:00",
+  "doors_at": "2027-02-26T17:00:00+00:00",
+  "timezone": "Europe/London",
+  "attendance_mode": "physical",
+  "availability": {
+    "status": "on_sale",
+    "display_label": "On sale"
+  },
+  "venue": {
+    "reference": "venue-cymru-theatre",
+    "name": "Venue Cymru Theatre",
+    "city": "Llandudno",
+    "country_code": "GB",
+    "address": {
+      "line_1": "The Promenade",
+      "postal_code": "LL30 1BB"
+    },
+    "location": {
+      "latitude": 53.321,
+      "longitude": -3.816
+    },
+    "capacity": {
+      "value": 2500,
+      "qualifier": "maximum"
+    },
+    "contacts": {
+      "box_office_phone": "+441234567890",
+      "box_office_phone_display": "01234 567890",
+      "box_office_email": "boxoffice@venue.example.com"
+    },
+    "website_url": "https://venue.example.com",
+    "seating_map": {
+      "method": "embed",
+      "label": "View seating map",
+      "url": "https://venue.example.com/seating-map"
+    },
+    "information": {
+      "accessibility": "Step-free access and accessible seating are available.",
+      "parking": "Public parking is available nearby.",
+      "public_transport": "Llandudno station is a 10-minute walk from the venue.",
+      "opening_hours": "The box office opens two hours before the event.",
+      "ticket_pickup": "Collect prepaid tickets from the box office with photo ID.",
+      "facilities": "Bars and a cloakroom are available.",
+      "custom_1": {
+        "label": "Bag policy",
+        "value": "Only small bags are permitted."
       }
     }
-  ]
+  },
+  "price_from": {
+    "amount_minor": 25000,
+    "currency": "GBP",
+    "includes_fees": false
+  },
+  "purchase": {
+    "method": "embed",
+    "url": "https://tickets.example.com/embed/10cc_2027_02_26"
+  }
 }
 ```
 
 ### Detail behaviour
 
-- `event_format` is `single` or `series`.
-- A single event normally returns one occurrence; a series returns all currently visible future occurrences.
-- `occurrence_reference` selects the date/venue to highlight. It does not change the parent event identity.
-- Past, cancelled or private occurrences are excluded by default unless product requirements say otherwise.
-- The response must clearly identify a selected occurrence that is sold out, postponed, rescheduled or off sale.
+- Each event response contains its date, venue, availability, price and purchase details directly.
+- Past, cancelled or private events are excluded by default unless product requirements say otherwise.
+- The response must clearly identify an event that is sold out, postponed, rescheduled or off sale.
 - Return `404` when the event reference does not exist or is not publicly visible.
-- Return `400` when `occurrence_reference` does not belong to the event.
 - The detail response should support `ETag` or `Last-Modified` validation.
 
 Extended venue fields are optional and belong on the full event response rather than search cards. `box_office_phone` uses E.164 format for calling links, while `box_office_phone_display` contains locally formatted copy. Capacity may vary by seating or event configuration, so `capacity.qualifier` should state whether the figure is `maximum`, `seated`, `standing` or `event_configuration`.
 
-`venue.information` is an extensible array for facts such as accessibility, parking, public transport, opening hours, collection instructions and facilities. `type` is machine-readable, while `label` and `value` are display content. The supplier must document supported types and return plain text unless a safe rich-text format is explicitly agreed.
+`venue.information` is a structured object rather than a free-form repeater. Its fixed optional fields are `accessibility`, `parking`, `public_transport`, `opening_hours`, `ticket_pickup` and `facilities`; their display labels are owned by Orbit. Two optional custom slots, `custom_1` and `custom_2`, each accept a `label` and `value`. Unused fields and custom slots should be omitted rather than returned as empty strings. Values are plain text unless a safe rich-text format is explicitly agreed.
 
 The design includes a ticket purchase embed supplied by the ticketing provider. `purchase.method` should support at least `embed` and `redirect`. When the embed owns ticket types, quantities, fees and live inventory, those values should not be duplicated in this discovery API. A native Orbit ticket selector would require a separate transactional inventory and reservation contract.
 
 `venue.seating_map` is optional and represents the venue's general seating plan. `method` should support `embed` and `external_link`. WordPress is responsible for rendering the iframe or link, but the supplier must provide an HTTPS URL from an agreed, allowlisted origin. The provider must also confirm its iframe requirements, including Content Security Policy, `frame-ancestors`, cookies and any required sandbox permissions.
-
-If an event can contain too many occurrences to return efficiently, the provider may paginate them through `GET /v1/events/{reference}/occurrences`; this is not required for the initial contract unless real catalogue data demonstrates the need.
 
 ## 10. Availability values
 
@@ -547,8 +520,8 @@ The API provider should confirm or amend the following before implementation:
 9. Visibility rules for sold-out, postponed, rescheduled and cancelled events.
 10. Search ranking, synonyms, spelling tolerance and minimum query length.
 11. Maximum page size, rate limits, caching and index freshness.
-12. The stable, URL-safe reference format and the WordPress routing distinction between event-series and occurrence pages.
+12. The stable, URL-safe event reference format used by WordPress routes.
 13. Supported locales, currencies and countries at launch.
 14. Whether purchase uses an embed or redirect, and which system owns ticket types and live inventory.
-15. Which venue information types are supplied and whether capacity represents a maximum or event-specific configuration.
+15. The final fixed venue-information labels — currently proposed as Accessibility, Parking, Public transport, Opening hours, Ticket pickup and Facilities — the availability of each field, any length limits for the two custom slots, and whether capacity represents a maximum or event-specific configuration.
 16. Seating-map ownership and the domains and browser permissions required for iframe embedding.
