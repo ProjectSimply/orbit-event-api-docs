@@ -1,8 +1,16 @@
 # Orbit event search API requirements
 
-Status: Draft for supplier review  
+Status: Supplier connection details recorded; endpoint names and payload contract remain draft for supplier review.
+
 Audience: API provider and website implementation team  
 Source design: [Figma — B2C/B2B websites, desktop UI](https://www.figma.com/design/5oN02SUp3cWDasZmfGRnnG/B2C---B2B-%E2%80%A8websites?node-id=3303-80&p=f&t=3JoZdNHK2fzhf0jy-0)
+
+This document is not a final technical specification or an approved
+implementation contract. It is a starting point describing the website's needs
+and the supplier information received so far. The supplier is responsible for
+developing its own technical specification, resolving the open questions and
+confirming the final design with the client before implementation. Proposed
+endpoints, payloads and behaviours below remain subject to that process.
 
 ## 1. Purpose
 
@@ -36,7 +44,7 @@ The API provider should identify:
 
 Exact payload structure can be adapted by agreement. The important outcomes are that the website receives the required information, relationships and behaviour with clear ownership and reliable performance. Where the supplier proposes a different contract, it should provide an example payload and a short mapping back to the relevant requirement in this document.
 
-A small transformation in WordPress or an integration layer is acceptable when it keeps responsibilities clear. Search meaning, availability and other business-critical rules should remain owned by the authoritative backend rather than being reconstructed independently in the browser.
+A small transformation in WordPress's server-side integration is acceptable when it keeps responsibilities clear. WordPress calls the supplier API directly; a separate middleware/proxy service is not required. Search meaning, availability and other business-critical rules should remain owned by the authoritative backend rather than being reconstructed independently in the browser.
 
 ## 3. Experience represented in the design
 
@@ -71,10 +79,88 @@ The genre list should be treated as API-managed data rather than a permanent har
 
 ## 4. General API conventions
 
+### Supplier-provided connection details
+
+| Environment | Base URL pattern | Version 1 example |
+| --- | --- | --- |
+| TEST | `https://orbit-test-api.kaleidaext.co.uk/api/eventsearch/v{version}/` | [TEST v1](https://orbit-test-api.kaleidaext.co.uk/api/eventsearch/v1/) |
+| UAT | `https://adminapi.ticketline.dev/api/eventsearch/v{version}/` | [UAT v1](https://adminapi.ticketline.dev/api/eventsearch/v1/) |
+| Live | `https://adminapi.orbit.tickets/api/eventsearch/v{version}/` | [Live v1](https://adminapi.orbit.tickets/api/eventsearch/v1/) |
+
+`{version}` is replaced by the agreed version number. Endpoint names will be
+confirmed as part of the supplier's technical design. For readability, the
+proposed paths below use `/v1/...` as shorthand for
+`/api/eventsearch/v1/...`; do not append another `v1` to the configured base URL.
+For example, the proposed `/v1/events` endpoint would resolve in TEST to
+`https://orbit-test-api.kaleidaext.co.uk/api/eventsearch/v1/events`.
+
+WordPress calls the API directly from its server-side PHP integration. The
+browser calls WordPress for public search results; WordPress performs the
+authenticated supplier request and returns only validated public data. This
+keeps the bearer token private and allows shared caching and request limits.
+
+Every supplier request passes the environment's token in the HTTP header:
+
+```http
+Authorization: Bearer <environment-specific-token>
+```
+
+Tokens must be provisioned securely and stored in server environment/configuration,
+not committed, included in URLs, exposed in browser code or logged. No separate
+permissions/scopes model has been specified at present; the supplier has proposed
+access control through bearer tokens and IP allow-lists. Whether IP allow-listing
+must be mandatory remains to be agreed.
+
+### AWS hosting and IP allow-listing — subject to assessment
+
+WordPress will make server-side PHP requests from AWS. Fixed outbound public IP
+addresses are not currently guaranteed, as the hosting infrastructure may scale
+or replace instances. Stable egress is possible through suitable AWS networking
+such as a public NAT gateway with Elastic IPs, but the current hosting setup has
+not been assessed and this may require additional configuration and cost.
+Provision of a fixed address or range is therefore subject to hosting assessment,
+not an unconditional Project Simply commitment.
+
+The supplier should respond to the following before the technical specification
+is finalised:
+
+> Can environment-specific bearer-token authentication be supported without
+> mandatory IP allow-listing? If fixed-IP allow-listing is essential, please
+> confirm it as a hosting dependency so Project Simply can assess the required
+> stable egress configuration and associated costs with the client.
+
+If mandatory allow-listing is agreed, Project Simply must first assess and agree
+the hosting changes and costs with the client. Only then can the outbound public
+IP addresses for all calling web servers and background/cache-warming workers
+be confirmed and supplied for allow-listing in the relevant API environments.
+Successful authenticated access must be tested before enabling the integration.
+
+### Supplier-suggested request limits
+
+These defaults can be amended by agreement; they are not final quotas:
+
+| Limit | Suggested default | Purpose |
+| --- | --- | --- |
+| Sustained | 600 requests per minute | Approximately 10 searches per second continuously |
+| Concurrency | 50 simultaneous requests | Bound simultaneous supplier work from the WordPress servers |
+
+The WordPress client should use caching, debounce, request deduplication and
+bounded outbound concurrency rather than treating the quota as a target. Apply
+the budget across web and background workers, not independently per PHP request.
+The supplier still needs to confirm whether limits are per token, IP or
+environment, the burst policy, and rate-limit/`Retry-After` headers. Handle `429`
+responses without a retry storm; serve eligible last-known-good cached data or
+a clear unavailable state, never fabricated event results.
+
+### Response conventions
+
 | Concern | Requirement |
 | --- | --- |
-| Base path | Versioned HTTPS endpoint, shown below as `/v1` |
-| Authentication | Supplier to confirm. Prefer a server-side bearer token; no reusable secret may be exposed in browser code. |
+| Base path | `/api/eventsearch/v{version}/` on the selected environment host; `/v1` below is shorthand for `/api/eventsearch/v1`. |
+| Integration | WordPress calls the supplier directly from server-side PHP; browser requests go through WordPress. |
+| Authentication | `Authorization: Bearer <environment-specific-token>`; no reusable secret may be exposed in browser code. |
+| Access control | Bearer authentication specified; supplier to confirm whether IP allow-listing is mandatory. Fixed outbound IP provision is subject to AWS hosting assessment and client agreement; no separate permissions/scopes model specified. |
+| Request limits | Suggested defaults: 600 requests/minute sustained and 50 simultaneous; adjustable by agreement. |
 | Content type | `application/json; charset=utf-8` |
 | References | Stable, immutable, URL-safe strings. WordPress uses the event reference to build its local `/events/{reference}` route. |
 | Dates | Calendar dates use ISO 8601 `YYYY-MM-DD`. |
@@ -220,6 +306,7 @@ Taxonomy IDs must remain stable even if a display label changes.
 | `category` | string | No | One category ID. Omit for All. |
 | `genre` | string[] | No | Repeat the parameter for multiple genre IDs. Matching is OR within this filter. |
 | `sort` | enum | No | `date`, `name`, `recently_added` or `trending`. |
+| `collection` | string | No | A supplier-managed curated collection, initially `homepage_featured`. Cannot be combined with free-text search. |
 | `cursor` | string | No | Opaque cursor from the preceding response. |
 | `limit` | integer | No | Default `24`, maximum `48`. |
 | `locale` | string | No | BCP 47 language tag. |
@@ -308,6 +395,28 @@ Physical venue results must include `venue.location`. Online-only events may ret
 The same standardized `/v1/events` items power both the list and map. There is no separate map response. WordPress plots each result using `venue.location`, while `location_reference` remains the user-facing location filter.
 
 The `artist` parameter filters events by a credited artist or performer name rather than by event-title text alone. The provider should apply its authoritative artist data and alias rules instead of having WordPress infer artists from titles.
+
+### Homepage event collections
+
+The homepage reuses the standard event-card representation rather than introducing
+a second card schema:
+
+- Featured events: `GET /v1/events?collection=homepage_featured&limit=6`
+- Trending gigs: `GET /v1/events?category=gigs&sort=trending&limit=6`
+- Trending festivals: `GET /v1/events?category=festivals&sort=trending&limit=6`
+- Trending sport: `GET /v1/events?category=sport&sort=trending&limit=6`
+
+`homepage_featured` is an ordered, supplier-managed collection. The response
+must preserve its curated order and omit events that are no longer publicly
+visible. If an item becomes unavailable, the remaining items move up without
+returning a placeholder. The standard `/v1/events` response and event-card
+fields still apply.
+
+Orbit owns homepage headings, explanatory copy, buttons and promoter content in
+WordPress. The supplier owns event identity, images, dates, venues, availability,
+trending order and the featured collection. This keeps business-critical event
+facts authoritative while allowing the homepage presentation to evolve
+independently.
 
 ### Event identity
 
@@ -475,7 +584,8 @@ Expected statuses:
 
 ## 12. Performance and operational requirements
 
-These are proposed targets for supplier confirmation:
+The connection details and suggested request-limit defaults are recorded in
+section 4. The following additional targets remain proposed for supplier confirmation:
 
 - suggestion response: p95 no more than 300 ms at the API edge;
 - event search response: p95 no more than 700 ms at the API edge;
@@ -488,14 +598,17 @@ These are proposed targets for supplier confirmation:
 - separate non-production and production credentials;
 - a supplier status page and support/escalation route.
 
-The browser will debounce type-ahead calls and cancel stale requests, but the API must tolerate concurrent requests and results arriving out of order.
+The browser will debounce type-ahead calls to WordPress and cancel stale requests,
+but cancellation in the browser does not guarantee cancellation of an outbound
+supplier request. WordPress must also bound and deduplicate its outbound calls;
+the API must tolerate concurrent requests and results arriving out of order.
 
 ## 13. Supplier decisions required
 
 The API provider should confirm or amend the following before implementation:
 
-1. Production and non-production base URLs.
-2. Authentication method and whether calls must be proxied through the Orbit backend.
+1. Final endpoint names beneath the supplied `/api/eventsearch/v{version}/` base URLs and the version available for implementation.
+2. Provisioning and rotation of environment-specific bearer tokens, and whether token-authenticated access can be supported without mandatory IP allow-listing. If fixed-IP allow-listing is essential, confirm the hosting dependency so Project Simply can assess stable AWS egress and associated costs with the client before committing to addresses. WordPress's direct server-side integration is established.
 3. Exact location model: city/region references and the source and accuracy of venue coordinates.
 4. Inclusive date-range and timezone behaviour for events spanning midnight or several days.
 5. Definitions and tie-break rules for Trending and Recently added.
@@ -503,7 +616,7 @@ The API provider should confirm or amend the following before implementation:
 7. Source of result headings such as “Gigs in Manchester”: API or frontend.
 8. Visibility rules for sold-out, postponed, rescheduled and cancelled events.
 9. Search ranking, synonyms, spelling tolerance, minimum query length, and whether `artist` matching supports exact names, partial names and aliases.
-10. Maximum page size, rate limits, caching and index freshness.
+10. Maximum page size, caching and index freshness; confirmation or amendment of the suggested 600 requests/minute and 50 simultaneous limits, their enforcement scope, burst policy and rate-limit headers.
 11. The stable, URL-safe event reference format used by WordPress routes.
 12. Supported locales and countries at launch.
 13. Whether purchase uses an embed or redirect, and confirmation that the iframe owns ticket types, pricing, fees and live inventory.
