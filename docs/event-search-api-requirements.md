@@ -73,7 +73,9 @@ The browse page provides:
 - a zero-results state;
 - cursor-based “load more” pagination.
 
-The website will also display search results on a map. Events with a physical venue therefore require accurate coordinates, but the map uses the same standard event results and location filter as the list.
+The website will also display search results on a map. The map uses the same
+standard event results and location filter as the list, but can plot only Events
+whose Venues include coordinates.
 
 The genre list should be treated as API-managed data rather than a permanent hard-coded list.
 
@@ -108,32 +110,23 @@ Authorization: Bearer <environment-specific-token>
 Tokens must be provisioned securely and stored in server environment/configuration,
 not committed, included in URLs, exposed in browser code or logged. No separate
 permissions/scopes model has been specified at present; the supplier has proposed
-access control through bearer tokens and IP allow-lists. Whether IP allow-listing
-must be mandatory remains to be agreed.
+access control through bearer tokens and IP allow-lists. Project Simply does not
+accept mandatory IP allow-listing for this integration.
 
-### AWS hosting and IP allow-listing — subject to assessment
+### Authentication constraint — no fixed source IPs
 
-WordPress will make server-side PHP requests from AWS. Fixed outbound public IP
-addresses are not currently guaranteed, as the hosting infrastructure may scale
-or replace instances. Stable egress is possible through suitable AWS networking
-such as a public NAT gateway with Elastic IPs, but the current hosting setup has
-not been assessed and this may require additional configuration and cost.
-Provision of a fixed address or range is therefore subject to hosting assessment,
-not an unconditional Project Simply commitment.
+WordPress will make server-side PHP requests from dynamically hosted AWS
+infrastructure. Project Simply will not provide or commit to specific outbound
+public IP addresses for web servers or background/cache-warming workers.
+IP-based allow-listing must not be a mandatory authentication or access control
+for the Orbit website integration.
 
-The supplier should respond to the following before the technical specification
-is finalised:
-
-> Can environment-specific bearer-token authentication be supported without
-> mandatory IP allow-listing? If fixed-IP allow-listing is essential, please
-> confirm it as a hosting dependency so Project Simply can assess the required
-> stable egress configuration and associated costs with the client.
-
-If mandatory allow-listing is agreed, Project Simply must first assess and agree
-the hosting changes and costs with the client. Only then can the outbound public
-IP addresses for all calling web servers and background/cache-warming workers
-be confirmed and supplied for allow-listing in the relevant API environments.
-Successful authenticated access must be tested before enabling the integration.
+The supplier must support the proposed environment-specific bearer tokens
+without an IP restriction. If bearer-token authentication alone is not
+acceptable, the supplier must propose another machine-to-machine authentication
+method compatible with dynamic AWS egress and not dependent on fixed client
+source IP addresses. The parties must agree and test that method before enabling
+the integration.
 
 ### Supplier-suggested request limits
 
@@ -159,7 +152,7 @@ a clear unavailable state, never fabricated event results.
 | Base path | `/api/eventsearch/v{version}/` on the selected environment host; `/v1` below is shorthand for `/api/eventsearch/v1`. |
 | Integration | WordPress calls the supplier directly from server-side PHP; browser requests go through WordPress. |
 | Authentication | `Authorization: Bearer <environment-specific-token>`; no reusable secret may be exposed in browser code. |
-| Access control | Bearer authentication specified; supplier to confirm whether IP allow-listing is mandatory. Fixed outbound IP provision is subject to AWS hosting assessment and client agreement; no separate permissions/scopes model specified. |
+| Access control | Mandatory IP allow-listing is not supported. Use environment-specific bearer tokens without an IP restriction, or another agreed machine-to-machine method that does not depend on fixed client source IP addresses. |
 | Request limits | Suggested defaults: 600 requests/minute sustained and 50 simultaneous; adjustable by agreement. |
 | Content type | `application/json; charset=utf-8` |
 | References | Stable, immutable, URL-safe strings. WordPress uses the event reference to build its local `/events/{reference}` route. |
@@ -167,7 +160,7 @@ a clear unavailable state, never fabricated event results.
 | Date/times | RFC 3339 with an explicit UTC offset, plus an IANA timezone on the event. |
 | Pagination | Opaque cursor. Results must remain in a deterministic order while paging. |
 | Images | HTTPS URL, width, height and alt text. At least one card-ready crop is required. |
-| Coordinates | WGS84 decimal latitude and longitude (`EPSG:4326`). Latitude is `-90` to `90`; longitude is `-180` to `180`. |
+| Coordinates | Optional. When supplied, use WGS84 decimal latitude and longitude (`EPSG:4326`). Latitude is `-90` to `90`; longitude is `-180` to `180`. |
 | Website routes | Owned by WordPress. The discovery API returns references rather than Orbit website URLs. External purchase, seating-map and venue website URLs are allowed where the external party owns them. |
 | Nullability | Omit genuinely unavailable optional values or return `null` consistently; do not use empty strings as missing values. |
 
@@ -299,6 +292,7 @@ Taxonomy IDs must remain stable even if a display label changes.
 | --- | --- | --- | --- |
 | `q` | string | No | Free-text event search. |
 | `artist` | string | No | Free-text artist or performer name. Matching should be case- and accent-insensitive. |
+| `reference` | string[] | No | Repeat to retrieve a set of specifically selected Events efficiently. The caller preserves the required display order. Final batch-query syntax may be adapted by agreement. |
 | `location_reference` | string | No | Reference selected from a location suggestion. |
 | `venue_reference` | string | No | Reference selected from a venue suggestion. |
 | `starts_on_or_after` | date | No | Inclusive local calendar date. |
@@ -306,7 +300,6 @@ Taxonomy IDs must remain stable even if a display label changes.
 | `category` | string | No | One category ID. Omit for All. |
 | `genre` | string[] | No | Repeat the parameter for multiple genre IDs. Matching is OR within this filter. |
 | `sort` | enum | No | `date`, `name`, `recently_added` or `trending`. |
-| `collection` | string | No | A supplier-managed curated collection, initially `homepage_featured`. Cannot be combined with free-text search. |
 | `cursor` | string | No | Opaque cursor from the preceding response. |
 | `limit` | integer | No | Default `24`, maximum `48`. |
 | `locale` | string | No | BCP 47 language tag. |
@@ -323,7 +316,6 @@ GET /v1/events?artist=Neon%20Parallels&location_reference=manchester&starts_on_o
 {
   "request_id": "req_01JABC125",
   "total_count": 59,
-  "heading": "Gigs in Manchester",
   "applied_filters": {
     "artist": "Neon Parallels",
     "location": { "reference": "manchester", "label": "Manchester" },
@@ -353,8 +345,7 @@ GET /v1/events?artist=Neon%20Parallels&location_reference=manchester&starts_on_o
       "venue": {
         "reference": "academy-2-manchester",
         "name": "Academy 2",
-        "city": "Manchester",
-        "country_code": "GB",
+        "town": "Manchester",
         "location": {
           "latitude": 53.4641,
           "longitude": -2.2323
@@ -377,6 +368,10 @@ GET /v1/events?artist=Neon%20Parallels&location_reference=manchester&starts_on_o
 }
 ```
 
+WordPress constructs human-readable result headings such as “Gigs in
+Manchester” from `total_count` and the labels in `applied_filters`. Presentation
+copy and localisation are not owned by the API.
+
 ### Required event-card fields
 
 Every item must supply enough data to render the card without another API request:
@@ -385,38 +380,53 @@ Every item must supply enough data to render the card without another API reques
 - event title;
 - card image and alt text;
 - local start date and time;
-- venue name and city;
+- venue name and town;
 - attendance mode;
 - availability/status label, when applicable;
 - enough identity data for WordPress to build the local event route.
 
-Physical venue results must include `venue.location`. Online-only events may return `venue: null` and `attendance_mode: "online"`. An event whose coordinates are unknown must not be silently placed at a city-centre fallback coordinate.
+Physical venue results include a Venue, but `venue.location` is optional because
+Orbit does not hold coordinates for every Venue. Online-only Events may return
+`venue: null` and `attendance_mode: "online"`. An Event whose coordinates are
+unknown remains available in list results but cannot be plotted and must not be
+silently placed at a town-centre or other fallback coordinate.
 
-The same standardized `/v1/events` items power both the list and map. There is no separate map response. WordPress plots each result using `venue.location`, while `location_reference` remains the user-facing location filter.
+The same standardized `/v1/events` items power both the list and map. There is
+no separate map response. The website plots only results containing a valid
+`venue.location`, while `location_reference` remains the user-facing location
+filter.
 
 The `artist` parameter filters events by a credited artist or performer name rather than by event-title text alone. The provider should apply its authoritative artist data and alias rules instead of having WordPress infer artists from titles.
 
-### Homepage event collections
+### Homepage event queries
 
-The homepage reuses the standard event-card representation rather than introducing
-a second card schema:
+The homepage uses the standard Events search/browse endpoint and event-card
+representation. It does not require a dedicated Homepage endpoint, a
+supplier-managed Homepage collection or Homepage Featured/Trending flags.
 
-- Featured events: `GET /v1/events?collection=homepage_featured&limit=6`
-- Trending gigs: `GET /v1/events?category=gigs&sort=trending&limit=6`
-- Trending festivals: `GET /v1/events?category=festivals&sort=trending&limit=6`
-- Trending sport: `GET /v1/events?category=sport&sort=trending&limit=6`
+The Events endpoint must support these two query patterns:
 
-`homepage_featured` is an ordered, supplier-managed collection. The response
-must preserve its curated order and omit events that are no longer publicly
-visible. If an item becomes unavailable, the remaining items move up without
-returning a placeholder. The standard `/v1/events` response and event-card
-fields still apply.
+1. **Category/query** — a category reference, an API-supported sort and a result
+   limit, for example
+   `GET /v1/events?category=gigs&sort=trending&limit=6`. `trending` is a standard
+   Event sort whose ranking calculation and deterministic result order are owned
+   by the supplier.
+2. **Selected Events** — several stable Event references resolved efficiently in
+   one request, for example
+   `GET /v1/events?reference=event-a&reference=event-b&limit=6`. The supplier may
+   propose equivalent batch-query syntax on the same standard Events API. Each
+   returned item must retain its stable reference so the caller can restore the
+   required display order.
 
-Orbit owns homepage headings, explanatory copy, buttons and promoter content in
-WordPress. The supplier owns event identity, images, dates, venues, availability,
-trending order and the featured collection. This keeps business-critical event
-facts authoritative while allowing the homepage presentation to evolve
-independently.
+The same `/v1/events` search capability, optionally preceded by
+`/v1/search/suggestions`, must allow public future Events to be found before
+their stable references are selected. This does not require an admin-only or
+Homepage-specific endpoint.
+
+The supplier API remains authoritative for Event identity, title, images,
+dates, venue, status and availability. Homepage composition and presentation
+are outside the API contract. If a selected Event is no longer publicly
+available, the API must not replace it with another Event or placeholder.
 
 ### Event identity
 
@@ -471,28 +481,27 @@ The `{reference}` is the stable event reference returned by search and browse re
   ],
   "starts_at": "2027-02-26T19:30:00+00:00",
   "doors_at": "2027-02-26T17:00:00+00:00",
+  "ends_at": "2027-02-26T22:30:00+00:00",
   "timezone": "Europe/London",
   "attendance_mode": "physical",
+  "capacity": {
+    "value": 2500,
+    "qualifier": "event_configuration"
+  },
   "availability": {
     "status": "on_sale",
-    "display_label": "On sale"
+    "display_label": "Buy Tickets"
   },
   "venue": {
     "reference": "venue-cymru-theatre",
     "name": "Venue Cymru Theatre",
-    "city": "Llandudno",
-    "country_code": "GB",
-    "address": {
-      "line_1": "The Promenade",
-      "postal_code": "LL30 1BB"
-    },
+    "address": "The Promenade",
+    "town": "Llandudno",
+    "county": "Conwy",
+    "postcode": "LL30 1BB",
     "location": {
       "latitude": 53.321,
       "longitude": -3.816
-    },
-    "capacity": {
-      "value": 2500,
-      "qualifier": "maximum"
     },
     "contacts": {
       "box_office_phone": "+441234567890",
@@ -527,36 +536,70 @@ The `{reference}` is the stable event reference returned by search and browse re
 
 ### Detail behaviour
 
+- Each Event represents one individual show rather than a tour, production or
+  grouping of performances.
 - Each event response contains its date, venue, availability and purchase details directly.
 - Past, cancelled or private events are excluded by default unless product requirements say otherwise.
 - The response must clearly identify an event that is sold out, postponed, rescheduled or off sale.
 - Return `404` when the event reference does not exist or is not publicly visible.
 - The detail response should support `ETag` or `Last-Modified` validation.
 
-Extended venue fields are optional and belong on the full event response rather than search cards. `box_office_phone` uses E.164 format for calling links, while `box_office_phone_display` contains locally formatted copy. Capacity may vary by seating or event configuration, so `capacity.qualifier` should state whether the figure is `maximum`, `seated`, `standing` or `event_configuration`.
+The supplier has confirmed that each individual Event has an Event Name, Event
+Description, Event Info, Event Date, Door Time, Event End Date and Time, Venue,
+capacity, Event Status, one or more Genres, Ticket Price Types and Ticket Shop
+configuration. These map respectively to `title`, `description`,
+`additional_information`, `starts_at`, `doors_at`, `ends_at`, `venue`,
+`capacity`, `availability`, `genres`, the ticket-shop purchase experience and
+`purchase`. `additional_information` preserves labelled Event Info without
+requiring the website to interpret supplier-specific prose.
+
+Extended venue fields are optional and belong on the full event response rather than search cards. `box_office_phone` uses E.164 format for calling links, while `box_office_phone_display` contains locally formatted copy. Event capacity may vary by seating or configuration, so `capacity.qualifier` should state whether the figure is `maximum`, `seated`, `standing` or `event_configuration`.
+
+Orbit has confirmed that its current Venue fields are Venue Name, address, Town,
+County, Postcode, latitude and longitude. These map to `venue.name`,
+`venue.address`, `venue.town`, `venue.county`, `venue.postcode` and, when both
+coordinates are available, `venue.location`. Coordinates are not mandatory in
+the source system. If either coordinate is unavailable or invalid,
+`venue.location` must be omitted or returned as `null`; a partial coordinate
+pair must not be returned. This confirmation does not establish that venue
+contacts, a website, seating-map data or the extended information fields below
+exist in Orbit. Those fields must remain optional and be omitted when the
+supplier has no authoritative value; the website must handle their absence.
 
 `venue.information` is a structured object rather than a free-form repeater. Its fixed optional fields are `accessibility`, `parking`, `public_transport`, `opening_hours`, `ticket_pickup` and `facilities`; their display labels are owned by Orbit. Two optional custom slots, `custom_1` and `custom_2`, each accept a `label` and `value`. Unused fields and custom slots should be omitted rather than returned as empty strings. Values are plain text unless a safe rich-text format is explicitly agreed.
 
-The design includes a ticket purchase embed supplied by the ticketing provider. `purchase.method` should support at least `embed` and `redirect`. The iframe is the sole source of ticket types, quantities, pricing, fees and live inventory; those values are not duplicated in this discovery API. A native Orbit ticket selector would require a separate transactional inventory and reservation contract.
+The design includes a ticket purchase embed supplied by the ticketing provider. `purchase.method` should support at least `embed` and `redirect`. The confirmed Ticket Price Types are consumed within the ticket-shop purchase experience. The iframe is the sole source of ticket types, quantities, pricing, fees and live inventory; those values are not duplicated in this discovery API. A native Orbit ticket selector would require a separate transactional inventory and reservation contract.
 
 `venue.seating_map` is optional and represents the venue's general seating plan. `method` should support `embed` and `external_link`. WordPress is responsible for rendering the iframe or link, but the supplier must provide an HTTPS URL from an agreed, allowlisted origin. The provider must also confirm its iframe requirements, including Content Security Policy, `frame-ancestors`, cookies and any required sandbox permissions.
 
 ## 10. Availability values
 
-Recommended machine-readable values are:
+Orbit has confirmed the following existing Event Status values. The API should
+return both a stable machine-readable `status` and its customer-facing
+`display_label`:
 
-| Status | Meaning |
+| Proposed `status` | Confirmed `display_label` |
 | --- | --- |
-| `coming_soon` | Publicly visible but sales have not opened |
-| `on_sale` | Tickets can currently be purchased |
-| `selling_fast` | Supplier-defined low-availability state |
-| `sold_out` | No purchasable inventory remains |
-| `off_sale` | Sales have closed without implying sold out |
-| `cancelled` | Cancelled; excluded from discovery by default |
-| `postponed` | Date is under review |
-| `rescheduled` | Date has changed |
+| `on_sale_soon` | On Sale Soon |
+| `on_sale` | Buy Tickets |
+| `sold_out` | Sold Out |
+| `contact_venue` | Contact Venue |
+| `off_sale` | Off Sale |
+| `postponed` | Postponed |
+| `cancelled` | Cancelled |
+| `temporarily_unavailable` | Please Try Later |
+| `tickets_on_door` | Tickets Available on the Door |
+| `check_fanticks` | Check on Fanticks |
 
-The API owns the status; the website owns visual colour and styling. `display_label` may provide wording such as “Selling fast”, but Orbit must be able to fall back to its own copy using `status`.
+The final machine-readable codes may follow an existing supplier convention,
+but they must remain stable even if the display wording changes. The API owns
+the Event Status meaning; the website owns its visual colour and styling.
+
+Where a status implies an action, the Event detail must include the data needed
+to perform it. `on_sale` requires the Event-specific purchase configuration;
+`contact_venue` requires the relevant public venue contact details; and
+`check_fanticks` requires the appropriate HTTPS destination. A status must not
+produce a call to action that has no valid destination.
 
 ## 11. Errors
 
@@ -603,22 +646,171 @@ but cancellation in the browser does not guarantee cancellation of an outbound
 supplier request. WordPress must also bound and deduplicate its outbound calls;
 the API must tolerate concurrent requests and results arriving out of order.
 
-## 13. Supplier decisions required
+## 13. Project Simply responses to supplier diagram questions
 
-The API provider should confirm or amend the following before implementation:
+These responses record Project Simply's proposed website-integration position
+against the purple questions in the supplier's six workflow diagrams. They are
+not the supplier's final technical specification and do not replace client
+approval where a question determines product behaviour.
 
-1. Final endpoint names beneath the supplied `/api/eventsearch/v{version}/` base URLs and the version available for implementation.
-2. Provisioning and rotation of environment-specific bearer tokens, and whether token-authenticated access can be supported without mandatory IP allow-listing. If fixed-IP allow-listing is essential, confirm the hosting dependency so Project Simply can assess stable AWS egress and associated costs with the client before committing to addresses. WordPress's direct server-side integration is established.
-3. Exact location model: city/region references and the source and accuracy of venue coordinates.
-4. Inclusive date-range and timezone behaviour for events spanning midnight or several days.
-5. Definitions and tie-break rules for Trending and Recently added.
-6. Whether multiple genres use OR matching, as proposed, or AND matching.
-7. Source of result headings such as “Gigs in Manchester”: API or frontend.
-8. Visibility rules for sold-out, postponed, rescheduled and cancelled events.
-9. Search ranking, synonyms, spelling tolerance, minimum query length, and whether `artist` matching supports exact names, partial names and aliases.
-10. Maximum page size, caching and index freshness; confirmation or amendment of the suggested 600 requests/minute and 50 simultaneous limits, their enforcement scope, burst policy and rate-limit headers.
-11. The stable, URL-safe event reference format used by WordPress routes.
-12. Supported locales and countries at launch.
-13. Whether purchase uses an embed or redirect, and confirmation that the iframe owns ticket types, pricing, fees and live inventory.
-14. The final fixed venue-information labels — currently proposed as Accessibility, Parking, Public transport, Opening hours, Ticket pickup and Facilities — the availability of each field, any length limits for the two custom slots, and whether capacity represents a maximum or event-specific configuration.
-15. Seating-map ownership and the domains and browser permissions required for iframe embedding.
+### Common processing
+
+**COMMON-P1 — AWS outbound IP addresses**
+
+Project Simply will not provide or commit to fixed outbound IP addresses.
+Mandatory IP allow-listing is not supported. Use environment-specific bearer
+tokens without an IP restriction or agree another machine-to-machine
+authentication method compatible with dynamic AWS egress.
+
+### Event details
+
+**DETAIL-P1 — Summary, images and alternative text**
+
+A separate `summary` is optional because the current Event page requires the
+full description. If supplied, it must be plain text suitable for previews.
+Every discoverable Event must provide a card image suitable for an `800 × 800`
+crop, its HTTPS URL, intrinsic dimensions and meaningful alternative text. A
+larger detail image of at least 1,200 pixels wide is preferred. A focal point is
+desirable when one source image must support several crops.
+
+**DETAIL-P2 — Purchase iframe**
+
+The supplier must provide the TEST, UAT and Live iframe origins and document all
+Content Security Policy, `frame-ancestors`, cookie, redirect, popup, payment,
+`sandbox` and `allow` requirements. The complete purchase flow must work over
+HTTPS in current desktop and mobile browsers. Orbit will allow only the minimum
+required origins and browser capabilities. Reliance on third-party cookies
+should be avoided where possible and explicitly identified where unavoidable.
+
+The supplier must also define how the purchase iframe is bound to the specific
+Event or performance being displayed. The preferred contract is for the Event
+detail response to return a complete, ready-to-render, event-specific HTTPS URL
+in `purchase.url`. If the URL must instead be constructed by the website, the
+supplier must document the required Event/performance identifier, how it relates
+to the API Event reference, every required path or query parameter, and any
+session, signing, expiry and refresh rules. The website must not expose the API
+bearer token or any other reusable server credential to the browser. The
+supplier must also define the response when the Event cannot currently be
+purchased or embedded.
+
+**DETAIL-P3 — Detail cache**
+
+Use a five-minute fresh WordPress TTL and a 30-minute maximum validated
+last-known-good window during a supplier failure. Support conditional requests
+using `ETag`/`If-None-Match` or `Last-Modified` where possible. An authenticated
+purge webhook keyed by Event reference is desirable but not required for the
+initial release.
+
+### Event filters
+
+**FILTER-P1 — Definitions and defaults**
+
+The required filters are free text, Artist/Performer, Location, Venue, inclusive
+start/end dates, one primary Category and multiple Genres using OR matching.
+Supported sorts are Date, Name, Recently added and Trending. Defaults are All
+Categories, no Genre or Location restriction, Trending order and 24 results per
+page. Filter labels, stable IDs and supported sorts come from the API.
+
+**FILTER-P2 — Definition cache**
+
+Cache filter definitions in WordPress for one hour. Validated last-known-good
+definitions may be served for up to 24 hours during supplier failure. A purge
+webhook is optional because these definitions should change infrequently.
+
+### Event search and browse
+
+**SEARCH-P1 — Human-readable headings**
+
+WordPress supplies headings such as “Gigs in Manchester”. The API supplies the
+structured applied filters, their display labels and the total result count.
+
+**SEARCH-P2 — Page and image sizes**
+
+Use 24 Events per page by default and allow a maximum of 48, with opaque cursor
+pagination and deterministic ordering. Event cards require a square image
+suitable for an `800 × 800` crop, plus its HTTPS URL, intrinsic dimensions and
+meaningful alternative text.
+
+**SEARCH-P3 — Search cache and stale responses**
+
+Cache each normalized query in WordPress for five minutes. A validated
+last-known-good result may be served for up to 30 minutes during supplier
+failure. If no valid cache exists, return a clear unavailable/empty state; never
+substitute design fixtures or invented Event data. Purge/webhook invalidation is
+desirable but optional for the initial release.
+
+### Homepage Events — questions superseded
+
+The supplier diagram questions `HOME-P1`, `HOME-P2` and `HOME-P3` are redundant
+because they assume supplier-owned Homepage collections and a dedicated
+`/homepage` endpoint. That architecture is not required.
+
+Homepage composition is owned by the website rather than the supplier API. A
+homepage event row either:
+
+- selects and orders specific Event references; or
+- selects a Category, a standard API sort such as `trending`, and a display
+  limit.
+
+The existing `/v1/events` search/browse endpoint supplies both modes. Standard
+Event-query caching applies to those requests; there is no separate Homepage
+collection, Homepage cache contract, Homepage Featured/Trending flag or
+Homepage-specific API question for the supplier to resolve.
+
+The current design requests between one and six Events per row through the
+standard Events search `limit` parameter, for example
+`GET /v1/events?category=festivals&sort=trending&limit=6`. This is standard
+search-query behaviour rather than a Homepage-specific collection decision.
+
+### Search suggestions
+
+**SUGGEST-P1 — Spelling tolerance**
+
+Yes: use modest spelling tolerance for Event names, Artists, Venues and
+Locations. Rank exact and prefix matches above fuzzy matches. Do not apply fuzzy
+matching to stable identifiers or very short input.
+
+**SUGGEST-P2 — Minimum query length**
+
+Use two trimmed characters. WordPress does not request suggestions for zero- or
+one-character queries. Return five results per group by default, with a maximum
+configurable limit of ten.
+
+**SUGGEST-P3 — Suggestion cache**
+
+Cache normalized suggestion results in WordPress for 60 seconds. Validated stale
+results may be used for up to five minutes during a temporary supplier failure.
+Webhook invalidation is optional for the initial release; if supported, it
+should identify affected Event, Venue, Location or taxonomy tags.
+
+All stale-data policies above apply only to previously validated supplier data.
+Local design fixtures are never a production fallback.
+
+## 14. Supplier and client decisions required
+
+Only the following points remain unresolved and require supplier or client
+confirmation before implementation. Decisions already stated in this document
+are requirements, not questions to be reopened.
+
+1. Provisioning and rotation of environment-specific bearer tokens without IP
+   restriction. If bearer tokens alone are unacceptable, the supplier must
+   propose a machine-to-machine authentication method that supports dynamic AWS
+   egress and does not depend on fixed client source IPs.
+2. Inclusive date-range and timezone behaviour for Events spanning midnight or
+   several days.
+3. Discovery visibility and required website action for each confirmed Event
+   Status, particularly `contact_venue`, `postponed`, `cancelled`,
+   `temporarily_unavailable`, `tickets_on_door` and `check_fanticks`.
+4. Search ranking and synonym behaviour, including whether `artist` matching
+   supports exact names, partial names and aliases.
+5. Search-index freshness, plus confirmation or amendment of the suggested 600
+   requests/minute and 50 simultaneous limits, their enforcement scope, burst
+   policy and rate-limit headers.
+6. The stable, URL-safe Event reference format used by website routes and saved
+   editorial selections.
+7. Supported locales and countries at launch.
+8. The event-specific purchase iframe URL/identifier contract and URL lifetime,
+    plus supplier ownership and availability of seating-map data and the
+    permitted domains and browser requirements for both iframe types.
+9. The batch-query syntax for resolving a set of editorially selected Event
+    references efficiently without one supplier request per Event.

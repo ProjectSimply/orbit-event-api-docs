@@ -34,15 +34,14 @@ in server environment/configuration, never in this repository or public assets.
 
 The supplier has proposed bearer tokens and IP allow-lists; no separate
 permissions/scopes model has been specified. WordPress will make server-side
-PHP requests from AWS, where fixed outbound IP addresses are not currently
-guaranteed as instances may scale or be replaced.
+PHP requests from dynamically hosted AWS infrastructure. Project Simply will
+not provide or commit to fixed outbound source IP addresses, so IP allow-listing
+cannot be a mandatory authentication requirement.
 
-The supplier should confirm whether environment-specific bearer-token access
-can be supported without mandatory IP allow-listing. Provision of fixed outbound
-IP addresses is subject to an AWS hosting assessment, not an unconditional
-Project Simply commitment. If allow-listing is essential, the required stable
-egress configuration and associated costs must be assessed and agreed with the
-client before committing to addresses.
+The supplier must support environment-specific bearer-token authentication
+without an IP restriction. If bearer tokens alone are insufficient, the supplier
+must propose another agreed machine-to-machine authentication method that does
+not depend on fixed client source IP addresses.
 
 The supplier's suggested, adjustable defaults are **600 requests per minute**
 sustained (approximately 10 per second) and **50 simultaneous requests**. The
